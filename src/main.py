@@ -1,14 +1,14 @@
 import random
 import json
 import uuid
-from typing import List
-from pydantic import BaseModel
+from typing import List, Union
+from pydantic import BaseModel, field_validator
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
+from pydantic_core.core_schema import ValidationInfo
 
 SURROUND_MATRIX = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
@@ -16,7 +16,7 @@ SURROUND_MATRIX = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0),
 current_games_dict = {}
 
 
-app = FastAPI()
+app = FastAPI(title='Игра Minesweeper', description='Тестовое задание - реализация REST API по заданной спецификации (Вячеслав Сипаков)')
 
 app.mount("/static", StaticFiles(directory="../static"), name="static")
 
@@ -99,6 +99,12 @@ def scout_empty_cells(scouted_field: List[List[str]], field: List[List[str]], wi
                     scout_empty_cells(scouted_field, field, width, height, neighbour_x, neighbour_y)
 
 
+responses = {
+    400: {'model': ErrorResponse, 'description': 'Ошибка запроса или некорректное действие'},
+    200: {'model': GameInfoResponse, 'description': 'OK'},
+}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     return templates.TemplateResponse(
@@ -107,18 +113,7 @@ async def root(request: Request):
     )
 
 
-@app.get("/api/test", status_code=200)
-async def print_request(request: Request):
-    print(f'request header       : {dict(request.headers.items())}' )
-    print(f'request query params : {dict(request.query_params.items())}')
-    try :
-        print(f'request json         : {await request.json()}')
-    except Exception as err:
-        # could not parse json
-        print(f'request body         : {await request.body()}')
-
-
-@app.post("/api/new", status_code=200)
+@app.post("/api/new", responses=responses)
 async def new_game(body: NewGameRequest, request: Request):
     #request = full_request.body()
     print(f'request header       : {dict(request.headers.items())}')
@@ -133,6 +128,15 @@ async def new_game(body: NewGameRequest, request: Request):
 
     field = []
     scouted_field = []
+
+    if body.width > 30 or body.width < 2:
+        raise GameErrorException('Ширина поля должна быть не менее 2 и не более 30')
+    if body.height > 30 or body.height < 2:
+        raise GameErrorException('Высота поля должна быть не менее 2 и не более 30')
+    max_mines = body.width * body.height - 1
+    if body.mines_count > max_mines or body.mines_count < 1:
+        raise GameErrorException(f'Количество мин должно быть не менее 1 и не более {max_mines}')
+
     for i in range(body.height):
         row = []
         row_scouted = []
@@ -185,7 +189,7 @@ async def new_game(body: NewGameRequest, request: Request):
                             field=scouted_field)
 
 
-@app.post("/api/turn", status_code=200)
+@app.post("/api/turn", responses=responses)
 async def turn(body: GameTurnRequest, request: Request):
     print(f'request header       : {dict(request.headers.items())}')
     print(f'request query params : {dict(request.query_params.items())}')
@@ -197,11 +201,11 @@ async def turn(body: GameTurnRequest, request: Request):
     try:
         game_info = current_games_dict[body.game_id]
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail='Could not find game with this id')
+        raise GameErrorException('Игра с таким id не найдена')
 
     if game_info['completed'] is True:
-        raise GameErrorException(name='The game has ended')
-        #return ErrorResponse(error='The game has ended. Start a new game')
+        #raise GameErrorException('Игра завершена')
+        return ErrorResponse(error='The game has ended')
         #raise HTTPException(status_code=400, detail='The game has ended. Start a new game')
     print(game_info)
         #return ErrorResponse(error='Could not find game with this id', status_code=404)
@@ -209,7 +213,7 @@ async def turn(body: GameTurnRequest, request: Request):
         if game_info['scouted_field'][body.row][body.col] != ' ':
             #raise HTTPException(status_code=400, detail='Cell is already cleared')
             print(game_info['scouted_field'], '\nCell is already cleared')
-            raise GameErrorException(name='Cell is already cleared')
+            raise GameErrorException('Клетка уже открыта')
             #return ErrorResponse(error='Cell is already cleared')
             #raise HTTPException(status_code=400, detail='Cell is already cleared')
         if game_info['field'][body.row][body.col] == 'M':
@@ -276,5 +280,5 @@ async def turn(body: GameTurnRequest, request: Request):
                                         completed=False,
                                         field=game_info['scouted_field'])
     else:
-        raise HTTPException(status_code=400, detail='Turn coordinates out of bounds')
+        raise GameErrorException('Координаты за пределами поля')
         #return ErrorResponse(error='Turn coordinates out of bounds')
