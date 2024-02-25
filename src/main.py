@@ -82,8 +82,19 @@ def count_uncleared_cells(scouted_field: List[List[str]]) -> int:
     return uncleared_cells_count
 
 
-def count_mines_around_cells(scouted_field: List[List[str]], field: List[List[str]], height: int, width: int) -> None:
-    pass
+def count_mines_around_cells(field: List[List[str]], height: int, width: int) -> None:
+    for i, row in enumerate(field):
+        for j, cell in enumerate(field[i]):
+            if cell == 'M':
+                continue
+            cell_val = 0
+            for offset in SURROUND_MATRIX:
+                neighbour_y, neighbour_x = (i + offset[0], j + offset[1])
+                if 0 <= neighbour_y < height and 0 <= neighbour_x < width:
+                    neighbour_cell = field[neighbour_y][neighbour_x]
+                    if neighbour_cell == 'M':
+                        cell_val += 1
+            field[i][j] = str(cell_val)
 
 
 def scout_empty_cells(scouted_field: List[List[str]], field: List[List[str]], width: int, height: int, x: int, y: int) -> None:
@@ -99,6 +110,16 @@ def scout_empty_cells(scouted_field: List[List[str]], field: List[List[str]], wi
                     scout_empty_cells(scouted_field, field, width, height, neighbour_x, neighbour_y)
 
 
+async def debug_request_info(request: Request):
+    print(f'request header       : {dict(request.headers.items())}')
+    print(f'request query params : {dict(request.query_params.items())}')
+    try:
+        print(f'request json         : {await request.json()}')
+    except Exception as err:
+        # could not parse json
+        print(f'request body         : {await request.body()}')
+
+
 responses = {
     400: {'model': ErrorResponse, 'description': 'Ошибка запроса или некорректное действие'},
     200: {'model': GameInfoResponse, 'description': 'OK'},
@@ -106,7 +127,7 @@ responses = {
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
+async def get_game_client(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="game_client.html"
@@ -115,14 +136,7 @@ async def root(request: Request):
 
 @app.post("/api/new", responses=responses)
 async def new_game(body: NewGameRequest, request: Request):
-    #request = full_request.body()
-    print(f'request header       : {dict(request.headers.items())}')
-    print(f'request query params : {dict(request.query_params.items())}')
-    try:
-        print(f'request json         : {await request.json()}')
-    except Exception as err:
-        # could not parse json
-        print(f'request body         : {await request.body()}')
+    #await debug_request_info(request)
 
     game_uuid = str(uuid.uuid4())
 
@@ -146,31 +160,15 @@ async def new_game(body: NewGameRequest, request: Request):
         field.append(row)
         scouted_field.append(row_scouted)
 
-    #print(field)
-
     for i in range(body.mines_count):
         mine_x, mine_y = random.randint(0, body.width - 1), random.randint(0, body.height - 1)
-        #print(mine_x, mine_y)
         while field[mine_y][mine_x] != ' ':
             mine_x, mine_y = random.randint(0, body.width - 1), random.randint(0, body.height - 1)
-
         field[mine_y][mine_x] = 'M'
 
-    for i, row in enumerate(field):
-        for j, cell in enumerate(field[i]):
-            if cell == 'M':
-                continue
-            cell_val = 0
-            for offset in SURROUND_MATRIX:
-                neighbour_y, neighbour_x = (i + offset[0], j + offset[1])
-                if 0 <= neighbour_y < body.height and 0 <= neighbour_x < body.width:
-                    neighbour_cell = field[neighbour_y][neighbour_x]
-                    if neighbour_cell == 'M':
-                        cell_val += 1
-            field[i][j] = str(cell_val)
+    count_mines_around_cells(field, body.width, body.height)
 
-    print(scouted_field)
-    print(field)
+    #print(field)
 
     current_games_dict[game_uuid] = {
         "width": body.width,
@@ -191,31 +189,17 @@ async def new_game(body: NewGameRequest, request: Request):
 
 @app.post("/api/turn", responses=responses)
 async def turn(body: GameTurnRequest, request: Request):
-    print(f'request header       : {dict(request.headers.items())}')
-    print(f'request query params : {dict(request.query_params.items())}')
-    try:
-        print(f'request json         : {await request.json()}')
-    except Exception as err:
-        # could not parse json
-        print(f'request body         : {await request.body()}')
+    #await debug_request_info(request)
+
     try:
         game_info = current_games_dict[body.game_id]
     except KeyError as exc:
         raise GameErrorException('Игра с таким id не найдена')
-
     if game_info['completed'] is True:
-        #raise GameErrorException('Игра завершена')
-        return ErrorResponse(error='The game has ended')
-        #raise HTTPException(status_code=400, detail='The game has ended. Start a new game')
-    print(game_info)
-        #return ErrorResponse(error='Could not find game with this id', status_code=404)
+        raise GameErrorException('Игра завершена')
     if 0 <= body.row < game_info['height'] and 0 <= body.col < game_info['width']:
         if game_info['scouted_field'][body.row][body.col] != ' ':
-            #raise HTTPException(status_code=400, detail='Cell is already cleared')
-            print(game_info['scouted_field'], '\nCell is already cleared')
             raise GameErrorException('Клетка уже открыта')
-            #return ErrorResponse(error='Cell is already cleared')
-            #raise HTTPException(status_code=400, detail='Cell is already cleared')
         if game_info['field'][body.row][body.col] == 'M':
             new_field = convert_mines_to_x_marks(game_info['field'])
             game_info['completed'] = True
@@ -230,16 +214,10 @@ async def turn(body: GameTurnRequest, request: Request):
             #del current_games_dict[body.game_id]
             return response
         elif game_info['field'][body.row][body.col] == '0':
-            print('BEFORE SCOUTING:')
-            print('scouted_field:\n', game_info['scouted_field'])
-            print('field:\n', game_info['field'])
             game_info['scouted_field'][body.row][body.col] = game_info['field'][body.row][body.col]
             scout_empty_cells(game_info['scouted_field'], game_info['field'],
                               game_info['width'], game_info['height'],
                               body.col, body.row)
-            print('AFTER SCOUTING:')
-            print('scouted_field:\n', game_info['scouted_field'])
-            print('field:\n', game_info['field'])
             if game_info['mines_count'] == count_uncleared_cells(game_info['scouted_field']):
                 game_info['completed'] = True
                 game_info['scouted_field'] = game_info['field']
@@ -258,7 +236,6 @@ async def turn(body: GameTurnRequest, request: Request):
                                         mines_count=game_info['mines_count'],
                                         completed=False,
                                         field=game_info['scouted_field'])
-            #raise HTTPException(status_code=501, detail='Not implemented yet')
         else:
             game_info['scouted_field'][body.row][body.col] = game_info['field'][body.row][body.col]
             if game_info['mines_count'] == count_uncleared_cells(game_info['scouted_field']):
@@ -281,4 +258,3 @@ async def turn(body: GameTurnRequest, request: Request):
                                         field=game_info['scouted_field'])
     else:
         raise GameErrorException('Координаты за пределами поля')
-        #return ErrorResponse(error='Turn coordinates out of bounds')
