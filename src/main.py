@@ -1,7 +1,7 @@
 import random
 import json
 import uuid
-from typing import List, Union
+from typing import List, Union, Tuple
 from pydantic import BaseModel
 
 from fastapi import FastAPI, Request
@@ -57,6 +57,30 @@ async def game_error_exception_handler(request: Request, exc: GameErrorException
         status_code=400,
         content={"error": exc.name},
     )
+
+
+def generate_game_fields(width: int, height: int, mines_count: int) -> Tuple[List[List[str]], List[List[str]]]:
+    field = []
+    scouted_field = []
+
+    for i in range(height):
+        row = []
+        row_scouted = []
+        for j in range(width):
+            row.append(' ')
+            row_scouted.append(' ')
+        field.append(row)
+        scouted_field.append(row_scouted)
+
+    for i in range(mines_count):
+        mine_x, mine_y = random.randint(0, width - 1), random.randint(0, height - 1)
+        while field[mine_y][mine_x] != ' ':
+            mine_x, mine_y = random.randint(0, width - 1), random.randint(0, height - 1)
+        field[mine_y][mine_x] = 'M'
+
+    count_mines_around_cells(field, width, height)
+
+    return field, scouted_field
 
 
 def convert_mines_to_x_marks(field: List[List[str]]) -> List[List[str]]:
@@ -138,9 +162,6 @@ async def new_game(body: NewGameRequest, request: Request):
 
     game_uuid = str(uuid.uuid4())
 
-    field = []
-    scouted_field = []
-
     if body.width > 30 or body.width < 2:
         raise GameErrorException('Ширина поля должна быть не менее 2 и не более 30')
     if body.height > 30 or body.height < 2:
@@ -149,22 +170,7 @@ async def new_game(body: NewGameRequest, request: Request):
     if body.mines_count > max_mines or body.mines_count < 1:
         raise GameErrorException(f'Количество мин должно быть не менее 1 и не более {max_mines}')
 
-    for i in range(body.height):
-        row = []
-        row_scouted = []
-        for j in range(body.width):
-            row.append(' ')
-            row_scouted.append(' ')
-        field.append(row)
-        scouted_field.append(row_scouted)
-
-    for i in range(body.mines_count):
-        mine_x, mine_y = random.randint(0, body.width - 1), random.randint(0, body.height - 1)
-        while field[mine_y][mine_x] != ' ':
-            mine_x, mine_y = random.randint(0, body.width - 1), random.randint(0, body.height - 1)
-        field[mine_y][mine_x] = 'M'
-
-    count_mines_around_cells(field, body.width, body.height)
+    field, scouted_field = generate_game_fields(body.width, body.height, body.mines_count)
 
     #print(field)
 
