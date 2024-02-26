@@ -2,13 +2,11 @@ import random
 import json
 import uuid
 from typing import List, Union
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic_core.core_schema import ValidationInfo
 
 SURROUND_MATRIX = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
@@ -18,7 +16,7 @@ current_games_dict = {}
 
 app = FastAPI(title='Игра Minesweeper', description='Тестовое задание - реализация REST API по заданной спецификации (Вячеслав Сипаков)')
 
-app.mount("/static", StaticFiles(directory="../static"), name="static")
+#app.mount("/static", StaticFiles(directory="../static"), name="static")
 
 templates = Jinja2Templates(directory="../templates")
 
